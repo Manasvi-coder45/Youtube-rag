@@ -307,6 +307,8 @@ if video_url:
 
     if "v=" in video_url:
         video_id = video_url.split("v=")[1].split("&")[0]
+    elif "youtu.be/" in video_url:
+        video_id = video_url.split("youtu.be/")[1].split("?")[0]
     else:
         video_id = video_url
 
