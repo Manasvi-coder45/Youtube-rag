@@ -67,13 +67,19 @@ qa_container = st.container()
 def get_transcript(video_id):
     try:
         from youtube_transcript_api.proxies import GenericProxyConfig
+        import requests
         scraper_api_key = os.environ.get("SCRAPER_API_KEY")
         proxy_url = f"http://scraperapi:{scraper_api_key}@proxy-server.scraperapi.com:8001"
         proxy_config = GenericProxyConfig(
-        http_url=proxy_url,
-        https_url=proxy_url,
-    )
-        fetched_transcript = YouTubeTranscriptApi(proxy_config=proxy_config).fetch(video_id, languages=['en'])
+            http_url=proxy_url,
+            https_url=proxy_url,
+        )
+        session = requests.Session()
+        session.verify = False
+        fetched_transcript = YouTubeTranscriptApi(
+            proxy_config=proxy_config,
+            http_client=session
+        ).fetch(video_id, languages=['en'])
         transcript_list = fetched_transcript.to_raw_data()
     except TranscriptsDisabled:
         st.error("No captions available for this video.")
