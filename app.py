@@ -162,14 +162,12 @@ def split_with_timestamps(doc):
     return final_docs
 
 
-def build_vector_store(docs):
-
+@st.cache_resource(show_spinner=False)
+def build_vector_store(_docs_key, docs):
     embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-mpnet-base-v2"
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
-
     vector_store = FAISS.from_documents(docs, embeddings)
-
     return vector_store
 
 
@@ -197,10 +195,6 @@ End: {end}
 
     return "\n\n".join(context_parts)
 
-
-# -------------------------------
-# PROMPT TEMPLATE
-# -------------------------------
 
 prompt = PromptTemplate(
     template="""
@@ -232,32 +226,20 @@ Sources:
 )
 
 
-# -------------------------------
-# BUILD RAG PIPELINE
-# -------------------------------
-
 def build_chain(retriever):
-
     llm = ChatGroq(
         model="moonshotai/kimi-k2-instruct-0905",
-        temperature=0.2
+        temperature=0.2,
+        streaming=True
     )
-
     parser = StrOutputParser()
-
     parallel_chain = RunnableParallel({
         "context": retriever | RunnableLambda(format_docs),
         "question": RunnablePassthrough()
     })
-
     main_chain = parallel_chain | prompt | llm | parser
-
     return main_chain
 
-
-# -------------------------------
-# STREAMLIT UI
-# -------------------------------
 
 steps = [
     "Fetch Transcript",
@@ -268,14 +250,12 @@ steps = [
     "Initialize RAG Chain"
 ]
 
-# session state initialization
 if "step_status" not in st.session_state:
     st.session_state.step_status = {step: "pending" for step in steps}
 
 if "chain" not in st.session_state:
     st.session_state.chain = None
 
-# placeholder so the step list updates instead of duplicating
 with pipeline_container:
     step_container = st.empty()
 
@@ -320,6 +300,8 @@ if video_url:
 
     with status_container:
         st.info(f"Video ID: {video_id}")
+        thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+        st.image(thumbnail_url, use_container_width=True)
 
     render_steps()
 
@@ -358,10 +340,6 @@ if video_url:
             st.session_state.step_status["Create Embeddings"] = "running"
             render_steps()
 
-            embeddings = HuggingFaceEmbeddings(
-                model_name="sentence-transformers/all-MiniLM-L6-v2"
-            )
-
             st.session_state.step_status["Create Embeddings"] = "done"
             render_steps()
 
@@ -369,8 +347,8 @@ if video_url:
             st.session_state.step_status["Build Vector Database"] = "running"
             render_steps()
 
-            vector_store = FAISS.from_documents(final_docs, embeddings)
-
+            docs_key = video_id
+            vector_store = build_vector_store(docs_key, final_docs)
             retriever = vector_store.as_retriever(
                 search_type="similarity",
                 search_kwargs={"k": 4}
@@ -392,11 +370,22 @@ if video_url:
 
             with status_container:
                 st.success("Video ready for questions")
+                if st.button("📋 Summarize this video"):
+                    summary_prompt = "Give me a structured summary of this video with: 1) Main topic, 2) Key points covered, 3) Important timestamps to revisit."
+                    with st.spinner("Generating summary..."):
+                        summary = ""
+                        summary_box = st.empty()
+                        for chunk in st.session_state.chain.stream(summary_prompt):
+                            summary += chunk
+                            summary_box.markdown(
+                                f'<div class="answer-box">{summary}▌</div>',
+                                unsafe_allow_html=True
+                            )
+                        summary_box.markdown(
+                            f'<div class="answer-box">{summary}</div>',
+                            unsafe_allow_html=True
+                        )
 
-
-# -------------------------------
-# QUESTION SECTION
-# -------------------------------
 
 import re
 
@@ -418,36 +407,28 @@ def extract_earliest_timestamp(response_text):
 
 with qa_container:
     if st.session_state.chain is not None:
-
         question = st.text_input("Ask a question about the video")
-
         if question:
-
-            with st.spinner("Generating answer..."):
-
-                response = st.session_state.chain.invoke(question)
-
-            earliest_time = extract_earliest_timestamp(response)
-
             st.divider()
-
-            col1, col2 = st.columns([1.2,1])
-
+            col1, col2 = st.columns([1.2, 1])
             with col1:
-
                 st.subheader("Answer")
-
-                st.markdown(
-                    f'<div class="answer-box">{response}</div>',
+                response_box = st.empty()
+                full_response = ""
+                with st.spinner("Thinking..."):
+                    for chunk in st.session_state.chain.stream(question):
+                        full_response += chunk
+                        response_box.markdown(
+                            f'<div class="answer-box">{full_response}▌</div>',
+                            unsafe_allow_html=True
+                        )
+                response_box.markdown(
+                    f'<div class="answer-box">{full_response}</div>',
                     unsafe_allow_html=True
                 )
-
+            earliest_time = extract_earliest_timestamp(full_response)
             with col2:
-
                 st.subheader("Relevant Video Segment")
-
                 embed_url = f"https://www.youtube.com/embed/{video_id}?start={earliest_time}"
-
                 st.components.v1.iframe(embed_url, height=350)
-
                 st.caption(f"Starting at {earliest_time} seconds")
