@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled
 
@@ -12,16 +13,10 @@ from langchain_core.runnables import RunnableParallel, RunnablePassthrough, Runn
 from langchain_core.output_parsers import StrOutputParser
 
 from dotenv import load_dotenv
-# -------------------------------
-# CONFIGURATION
-# -------------------------------
 
 # Put your Groq API key here
 load_dotenv()
 
-# -------------------------------
-# STREAMLIT PAGE
-# -------------------------------
 
 st.set_page_config(page_title="YouTube RAG Assistant", layout="wide")
 
@@ -68,24 +63,23 @@ pipeline_container = st.container()
 status_container = st.container()
 qa_container = st.container()
 
-# -------------------------------
-# HELPER FUNCTIONS
-# -------------------------------
 
 def get_transcript(video_id):
-
     try:
-        fetched_transcript = YouTubeTranscriptApi().fetch(video_id, languages=['en'])
+        from youtube_transcript_api.proxies import GenericProxyConfig
+        scraper_api_key = os.environ.get("SCRAPER_API_KEY")
+        proxy_config = GenericProxyConfig(
+            http_proxy=f"http://scraperapi:{scraper_api_key}@proxy-server.scraperapi.com:8001",
+            https_proxy=f"http://scraperapi:{scraper_api_key}@proxy-server.scraperapi.com:8001",
+        )
+        fetched_transcript = YouTubeTranscriptApi(proxy_config=proxy_config).fetch(video_id, languages=['en'])
         transcript_list = fetched_transcript.to_raw_data()
-
     except TranscriptsDisabled:
         st.error("No captions available for this video.")
         return None
-
     except Exception as e:
         st.error(f"Error fetching transcript: {e}")
         return None
-
     return transcript_list
 
 
